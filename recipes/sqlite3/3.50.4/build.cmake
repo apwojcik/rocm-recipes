@@ -1,6 +1,10 @@
 
-cmake_minimum_required(VERSION 3.5)
+cmake_minimum_required(VERSION 3.15)
 project(sqlite3 C)
+
+if(GENERATOR_IS_MULTI_CONFIG)
+    message(FATAL_ERROR "Multi-config generators are not supported!")
+endif()
 
 option(WITH_SQLITE_DEBUG    "Build SQLite debug features" OFF)
 option(WITH_SQLITE_MEMDEBUG "Build SQLite memory debug features" OFF)
@@ -16,6 +20,55 @@ if(WITH_SQLITE_MEMDEBUG)
 endif()
 if(WITH_SQLITE_RTREE)
     add_definitions(-DSQLITE_ENABLE_RTREE)
+endif()
+
+option(USE_MSVC_STATIC_RUNTIME "Link MSVC runtime library statically " OFF)
+cmake_policy(SET CMP0091 NEW)
+
+# This is only required to suppress 'replacing /MT with /MD' message while compiling source files.
+# Without it, the workaround below (setting runtime options manually) will not work.
+if(NOT USE_MSVC_STATIC_RUNTIME)
+    set(MSVC_RUNTIME_SUFFIX "DLL")
+endif()
+if(NOT CMAKE_MSVC_RUNTIME_LIBRARY)
+    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>${MSVC_RUNTIME_SUFFIX}")
+endif()
+
+# For some reason, setting CMAKE_MSVC_RUNTIME_LIBRARY does not work as intended for this project.
+# The variable has the correct value, the policy has been set accordingly, and the target properties
+# have the same value copied from the global variable. Yet, the compiler still generates binaries
+# that dynamically link to the MSVC runtime library. The resulting binaries only include
+# the statically linked MSVC runtime library when we manually force the compile options (as below).
+if(WIN32)
+    if(CMAKE_C_COMPILER_FRONTEND_VARIANT STREQUAL "MSVC")
+        if(USE_MSVC_STATIC_RUNTIME)
+            if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MTd")
+            else()
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MT")
+            endif()
+        else()
+            if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MDd")
+            else()
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MD")
+            endif()
+        endif()
+    elseif(CMAKE_C_COMPILER_ID MATCHES "Clang")
+        if(USE_MSVC_STATIC_RUNTIME)
+            if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fms-runtime-lib=static_dbg")
+            else()
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fms-runtime-lib=static")
+            endif()
+        else()
+            if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fms-runtime-lib=dynamic_dbg")
+            else()
+                set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -fms-runtime-lib=dynamic")
+            endif()        
+        endif()
+    endif()
 endif()
 
 include_directories(${CMAKE_SOURCE_DIR})
